@@ -7,7 +7,7 @@ public class Board {
     public int[] boardArray;
     public boolean whiteToMove;
 
-    // Castling rights
+    // Track whether kings or rooks have moved to determine castling rights
     public boolean whiteKingMoved;
     public boolean blackKingMoved;
     public boolean whiteRookAMoved;
@@ -15,10 +15,10 @@ public class Board {
     public boolean blackRookAMoved;
     public boolean blackRookHMoved;
 
-    // En passant target square (-1 if none)
+    // Stores the index of the en passant target square (-1 if none available)
     public int enPassantTarget;
 
-    // Pending promotion: square that needs a promotion choice (-1 if none)
+    // Stores the index of a pawn waiting to choose its promotion piece (-1 if none)
     public int pendingPromotionSquare = -1;
 
     public Board() {
@@ -30,8 +30,8 @@ public class Board {
     }
 
     public void initializeBoard() {
-        // pawn=1, bishop=2, knight=3, rook=4, queen=5, king=6
-        // black=negative, white=positive
+        // Setup pieces: pawn=1, bishop=2, knight=3, rook=4, queen=5, king=6
+        // Positive values belong to White, negative values belong to Black
 
         boardArray[0] = -4; boardArray[1] = -3; boardArray[2] = -2; boardArray[3] = -5;
         boardArray[4] = -6; boardArray[5] = -2; boardArray[6] = -3; boardArray[7] = -4;
@@ -48,16 +48,14 @@ public class Board {
         pendingPromotionSquare = -1;
     }
 
-    // -------------------------------------------------------------------------
-    // Attack detection — never recurses into king castling logic
-    // -------------------------------------------------------------------------
-
+    // Check if a specific square can be attacked by the specified side
     public boolean isSquareAttacked(int square, boolean byWhite) {
         int sign = byWhite ? 1 : -1;
 
         int[][] rookDirs   = {{-1,0},{1,0},{0,-1},{0,1}};
         int[][] bishopDirs = {{-1,-1},{-1,1},{1,-1},{1,1}};
 
+        // Scan in straight lines to find threatening rooks or queens
         for (int[] dir : rookDirs) {
             int r = square / 8, c = square % 8;
             while (true) {
@@ -70,6 +68,7 @@ public class Board {
             }
         }
 
+        // Scan along diagonals to find threatening bishops or queens
         for (int[] dir : bishopDirs) {
             int r = square / 8, c = square % 8;
             while (true) {
@@ -82,6 +81,7 @@ public class Board {
             }
         }
 
+        // Check for any enemy knights in range
         int row = square / 8, col = square % 8;
         int[][] knightOffsets = {{-2,-1},{-2,1},{2,-1},{2,1},{-1,-2},{-1,2},{1,-2},{1,2}};
         for (int[] off : knightOffsets) {
@@ -91,6 +91,7 @@ public class Board {
             }
         }
 
+        // Check for enemy pawns capable of capturing diagonally
         int pawnDir = byWhite ? 1 : -1;
         int pawnRow = row + pawnDir;
         if (pawnRow >= 0 && pawnRow < 8) {
@@ -98,9 +99,10 @@ public class Board {
             if (col + 1 <  8 && boardArray[pawnRow * 8 + (col + 1)] == sign * 1) return true;
         }
 
+        // Check if the enemy king is sitting adjacent to this square
         int[][] kingDirs = {{-1,-1},{-1,0},{-1,1},{0,-1},{0,1},{1,-1},{1,0},{1,1}};
         for (int[] dir : kingDirs) {
-            int r = row + dir[0], c = col + dir[1];
+            int r = row + dir[dir[0]], c = col + dir[1];
             if (r >= 0 && r < 8 && c >= 0 && c < 8) {
                 if (boardArray[r * 8 + c] == sign * 6) return true;
             }
@@ -109,6 +111,7 @@ public class Board {
         return false;
     }
 
+    // Locate the king and see if it is currently in check
     public boolean isInCheck(boolean white) {
         int king = white ? 6 : -6;
         for (int i = 0; i < 64; i++) {
@@ -119,10 +122,7 @@ public class Board {
         return false;
     }
 
-    // -------------------------------------------------------------------------
-    // Pseudo-legal move generation
-    // -------------------------------------------------------------------------
-
+    // Generate every theoretical move on the board without checking if it leaves the king in danger
     public List<Integer> generateMoves() {
         List<Integer> moves = new ArrayList<>();
         for (int i = 0; i < 64; i++) {
@@ -134,6 +134,7 @@ public class Board {
         return moves;
     }
 
+    // Generate theoretical moves for just one single piece
     public List<Integer> generateMoves(int fromIndex) {
         List<Integer> moves = new ArrayList<>();
         int piece = boardArray[fromIndex];
@@ -144,10 +145,7 @@ public class Board {
         return moves;
     }
 
-    // -------------------------------------------------------------------------
-    // Legal move generation
-    // -------------------------------------------------------------------------
-
+    // Collect all valid moves across the entire board for the active player
     public List<Integer> generateLegalMoves() {
         List<Integer> legal = new ArrayList<>();
         for (int i = 0; i < 64; i++) {
@@ -159,6 +157,7 @@ public class Board {
         return legal;
     }
 
+    // Test a piece's theoretical moves to make sure they do not expose the king to check
     public List<Integer> generateLegalMoves(int from) {
         List<Integer> pseudo = generateMoves(from);
         List<Integer> legal  = new ArrayList<>();
@@ -166,7 +165,7 @@ public class Board {
 
         for (int to : pseudo) {
             MoveState state = makeMove(from, to);
-            // Temporarily treat the pawn as a queen for check detection
+            // Treat unpromoted pawns as queens for a split second to check if the move causes check
             if (pendingPromotionSquare != -1) {
                 int sign = movingWhite ? 1 : -1;
                 boardArray[pendingPromotionSquare] = sign * 5;
@@ -177,10 +176,6 @@ public class Board {
         return legal;
     }
 
-    // -------------------------------------------------------------------------
-    // Game state queries
-    // -------------------------------------------------------------------------
-
     public boolean isCheckmate() {
         return isInCheck(whiteToMove) && generateLegalMoves().isEmpty();
     }
@@ -189,10 +184,7 @@ public class Board {
         return !isInCheck(whiteToMove) && generateLegalMoves().isEmpty();
     }
 
-    // -------------------------------------------------------------------------
-    // Move execution and undo
-    // -------------------------------------------------------------------------
-
+    // Save state history data so moves can be reliably reversed
     public static class MoveState {
         int movedPiece, capturedPiece, enPassantTarget;
         boolean whiteToMove;
@@ -224,7 +216,7 @@ public class Board {
         int piece    = boardArray[from];
         int absPiece = Math.abs(piece);
 
-        // En passant capture
+        // Process en passant capture rules
         if (absPiece == 1 && to == enPassantTarget) {
             s.wasEnPassant    = true;
             s.epCapturedIndex = to + (piece > 0 ? 8 : -8);
@@ -232,13 +224,13 @@ public class Board {
             boardArray[s.epCapturedIndex] = 0;
         }
 
-        // Update en passant target for double pawn push
+        // Set en passant target tracking square if a pawn rushes forward two spaces
         enPassantTarget = -1;
         if (absPiece == 1 && Math.abs((to / 8) - (from / 8)) == 2) {
             enPassantTarget = (from + to) / 2;
         }
 
-        // Castling
+        // Process castling rules and automatically reposition the corresponding rook
         if (absPiece == 6 && Math.abs((to % 8) - (from % 8)) == 2) {
             s.wasCastle = true;
             if ((to % 8) == 6) {
@@ -252,22 +244,21 @@ public class Board {
             boardArray[s.rookFrom] = 0;
         }
 
-        // Move the piece
+        // Complete the basic tile slide
         boardArray[to]   = piece;
         boardArray[from] = 0;
 
-        // Pawn promotion — leave pawn on board, set pending flag; UI will call applyPromotion()
+        // Flag pawns reaching the back rank for promotion picker without swapping turns yet
         pendingPromotionSquare = -1;
         if (absPiece == 1) {
             int row = to / 8;
             if ((row == 0 && piece > 0) || (row == 7 && piece < 0)) {
                 pendingPromotionSquare = to;
-                // Do NOT flip turn yet; wait for applyPromotion()
                 return s;
             }
         }
 
-        // Update castling rights
+        // Terminate castling options if a critical piece shifts positions
         if (piece ==  6) whiteKingMoved = true;
         if (piece == -6) blackKingMoved = true;
         if (from == 56)  whiteRookAMoved = true;
@@ -279,21 +270,17 @@ public class Board {
         return s;
     }
 
-    /**
-     * Called by the UI after the player picks a promotion piece.
-     * absPieceChoice: 2=bishop, 3=knight, 4=rook, 5=queen
-     */
+    // Replace the pawn with the piece selected by the user, then pass the turn
     public void applyPromotion(int absPieceChoice) {
         if (pendingPromotionSquare == -1) return;
         int sign = boardArray[pendingPromotionSquare] > 0 ? 1 : -1;
         boardArray[pendingPromotionSquare] = sign * absPieceChoice;
         pendingPromotionSquare = -1;
 
-        // Now update castling rights and flip turn
-        // (rook/king flags were already correct before promotion)
         whiteToMove = !whiteToMove;
     }
 
+    // Step backward and reapply all previous variables from state history
     public void undoMove(int from, int to, MoveState s) {
         boardArray[from] = s.movedPiece;
         boardArray[to]   = s.wasEnPassant ? 0 : s.capturedPiece;
@@ -318,10 +305,7 @@ public class Board {
         pendingPromotionSquare  = s.pendingPromotionSquare;
     }
 
-    // -------------------------------------------------------------------------
-    // Piece move generators
-    // -------------------------------------------------------------------------
-
+    // Delegate generation rules to specific piece calculators
     private void addPieceMoves(int index, int piece, List<Integer> moves) {
         switch (Math.abs(piece)) {
             case 1: addPawnMoves(index, piece, moves);   break;
@@ -333,12 +317,14 @@ public class Board {
         }
     }
 
+    // Check if a tile is empty or occupied by an opponent's piece
     private boolean canMoveTo(int piece, int targetIndex) {
         int target = boardArray[targetIndex];
         if (target == 0) return true;
         return (piece > 0 && target < 0) || (piece < 0 && target > 0);
     }
 
+    // Used for slider pieces like rooks, bishops, and queens to search along lines
     private void slidingMoves(int index, int piece, List<Integer> moves, int[][] dirs) {
         int row = index / 8, col = index % 8;
         for (int[] dir : dirs) {
@@ -417,6 +403,7 @@ public class Board {
         boolean kingMoved = isWhite ? whiteKingMoved : blackKingMoved;
         if (kingMoved || isInCheck(isWhite)) return;
 
+        // Check if the squares between the white king and white rooks are clear and safe
         if (isWhite) {
             if (!whiteRookHMoved
                     && boardArray[61] == 0 && boardArray[62] == 0
@@ -428,6 +415,7 @@ public class Board {
                     && !isSquareAttacked(58, false) && !isSquareAttacked(59, false)) {
                 moves.add(58);
             }
+        // Check if the squares between the black king and black rooks are clear and safe
         } else {
             if (!blackRookHMoved
                     && boardArray[5] == 0 && boardArray[6] == 0
@@ -442,10 +430,7 @@ public class Board {
         }
     }
 
-    // -------------------------------------------------------------------------
-    // Utility
-    // -------------------------------------------------------------------------
-
+    // Prints a text representation of the layout to the terminal console
     public void printBoard() {
         System.out.println("  a b c d e f g h");
         for (int row = 0; row < 8; row++) {
@@ -465,17 +450,14 @@ public class Board {
         System.out.println(whiteToMove ? "White to move" : "Black to move");
     }
 
-    // Add this to the bottom of Engine/Board.java
+    // Duplicates the entire board profile so the engine can test combinations on a sandbox copy
     public Board cloneBoard() {
         Board clone = new Board();
 
-        // Copy the piece array layout
         System.arraycopy(this.boardArray, 0, clone.boardArray, 0, 64);
 
-        // Copy turn state
         clone.whiteToMove = this.whiteToMove;
 
-        // Copy castling flags
         clone.whiteKingMoved = this.whiteKingMoved;
         clone.blackKingMoved = this.blackKingMoved;
         clone.whiteRookAMoved = this.whiteRookAMoved;
@@ -483,7 +465,6 @@ public class Board {
         clone.blackRookAMoved = this.blackRookAMoved;
         clone.blackRookHMoved = this.blackRookHMoved;
 
-        // Copy special state rules
         clone.enPassantTarget = this.enPassantTarget;
         clone.pendingPromotionSquare = this.pendingPromotionSquare;
 
