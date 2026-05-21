@@ -194,9 +194,12 @@ public class Evaluate {
 
     private static final int TEMPO_BONUS               = 10;
 
+    // Evaluates the static score of the current board layout from White's perspective
     public static int evaluate(Board board) {
+        // Return drawn score immediately if neither side has winning checkmate material left
         if (isInsufficientMaterial(board)) return 0;
 
+        // Determine how close the game is to an endgame scenario
         int phase = computePhase(board);
 
         int mgScore = 0;
@@ -206,8 +209,10 @@ public class Evaluate {
         int whiteBishops = 0, blackBishops = 0;
         int whiteKingIdx = -1, blackKingIdx = -1;
 
+        // Bitmasks tracking which files contain at least one friendly pawn
         int whitePawnFiles = 0, blackPawnFiles = 0;
 
+        // Scan the entire board to calculate raw material totals and basic tile positioning scores
         for (int i = 0; i < 64; i++) {
             int piece = board.boardArray[i];
             if (piece == 0) continue;
@@ -216,11 +221,11 @@ public class Evaluate {
             int sign = piece > 0 ? 1 : -1;
             boolean isWhite = piece > 0;
 
-            // Basic Material Accounting
+            // Factor raw material value into the score totals
             mgScore += sign * PIECE_VALUES[abs];
             egScore += sign * PIECE_VALUES[abs];
 
-            // Map indexes smoothly
+            // Adjust table lookups for black pieces so they copy white's perspective from the opposite edge
             int pIndex = isWhite ? i : mirrorIndex(i);
 
             switch (abs) {
@@ -238,7 +243,7 @@ public class Evaluate {
                 case 3: // Knight
                     mgScore += sign * MG_KNIGHT_PST[pIndex];
                     egScore += sign * EG_KNIGHT_PST[pIndex];
-                    // Outpost verification
+                    // Award bonus points if the knight has secured a stable outpost tile
                     if (isOutpost(board, i, isWhite)) {
                         mgScore += sign * KNIGHT_OUTPOST_BONUS;
                     }
@@ -259,20 +264,22 @@ public class Evaluate {
             }
         }
 
-        // Complex Evaluation Layers
+        // Apply pawn configuration rules (doubled, isolated, and passed pawns)
         int pawnStructureScore = evaluatePawnStructure(board, whitePawnFiles, blackPawnFiles, phase);
         mgScore += pawnStructureScore;
         egScore += pawnStructureScore;
 
+        // Apply mobility score based on the count of active squares available to each side
         int mobilityDiff = evaluateMobility(board);
         mgScore += mobilityDiff * MOBILITY_MG_WEIGHT;
         egScore += mobilityDiff * MOBILITY_EG_WEIGHT;
 
+        // Apply positional values for open files and controlling the 7th rank with rooks
         int rookScoring = evaluateRooks(board, whitePawnFiles, blackPawnFiles);
         mgScore += rookScoring;
         egScore += rookScoring;
 
-        // Dynamic Scaling for Bishop Pairs
+        // Apply dynamic point updates if either color controls a paired bishop tandem
         if (whiteBishops >= 2) {
             mgScore += BISHOP_PAIR_BONUS_MG;
             egScore += BISHOP_PAIR_BONUS_EG;
@@ -282,22 +289,24 @@ public class Evaluate {
             egScore -= BISHOP_PAIR_BONUS_EG;
         }
 
-        // Tapered King Safety
+        // Apply king security checks, dynamically decaying danger variables as the board clears
         if (whiteKingIdx != -1 && blackKingIdx != -1) {
             int whiteSafety = evaluateKingSafety(board, true, whiteKingIdx, whitePawnFiles, blackPawnFiles);
             int blackSafety = evaluateKingSafety(board, false, blackKingIdx, blackPawnFiles, whitePawnFiles);
 
             mgScore += (whiteSafety - blackSafety);
-            // Safety factors degrade gracefully as pieces fall off the board
             egScore += ((whiteSafety - blackSafety) * phase) / 256;
         }
 
+        // Award a tiny bonus to the player whose turn it is to act next (tempo value)
         if (board.whiteToMove) mgScore += TEMPO_BONUS;
         else                   mgScore -= TEMPO_BONUS;
 
+        // Interpolate the final balance output smoothly between mid-game and end-game score tables
         return taperedScore(mgScore, egScore, phase);
     }
 
+    // Calculates a stage modifier (0 to 256) reflecting the total remaining high-value minor/major pieces
     private static int computePhase(Board board) {
         int phase = 0;
         for (int i = 0; i < 64; i++) {
@@ -313,27 +322,28 @@ public class Evaluate {
         return (phase * 256) / TOTAL_PHASE;
     }
 
+    // Blends the mid-game and end-game weights relative to the measured stage progress index
     private static int taperedScore(int mg, int eg, int phase) {
         return (mg * phase + eg * (256 - phase)) / 256;
     }
 
+    // Flips file row indexes vertically to read black configurations from their perspective
     private static int mirrorIndex(int idx) {
         int row = idx / 8;
         int col = idx % 8;
         return (7 - row) * 8 + col;
     }
 
+    // Checks if a piece is secure on an outpost square where it cannot be harassed away by enemy pawns
     private static boolean isOutpost(Board board, int index, boolean isWhite) {
         int row = index / 8;
         int col = index % 8;
 
-        // Outposts occur typically between ranks 4 and 6
         if (isWhite && (row < 2 || row > 4)) return false;
         if (!isWhite && (row < 3 || row > 5)) return false;
 
-        // Verify if it can be attacked by an opposing pawn
         int enemyPawn = isWhite ? -1 : 1;
-        int nextRow = isWhite ? row - 1 : row + 1; // Looking up/down vector files safely
+        int nextRow = isWhite ? row - 1 : row + 1; 
 
         if (nextRow >= 0 && nextRow < 8) {
             if (col > 0 && board.boardArray[nextRow * 8 + (col - 1)] == enemyPawn) return false;
@@ -342,6 +352,7 @@ public class Evaluate {
         return true;
     }
 
+    // Evaluates structural defects or advancements like doubled pawns, isolated pawns, and passed pawns
     private static int evaluatePawnStructure(Board board, int whitePawnFiles, int blackPawnFiles, int phase) {
         int score = 0;
         int[] whitePawnsOnFile = new int[8];
@@ -354,6 +365,7 @@ public class Evaluate {
             blackMostAdvanced[f] = 0;
         }
 
+        // Record column layout densities and peak forward advancement positions for both sides
         for (int i = 0; i < 64; i++) {
             int piece = board.boardArray[i];
             if (Math.abs(piece) != 1) continue;
@@ -369,14 +381,17 @@ public class Evaluate {
         }
 
         for (int col = 0; col < 8; col++) {
-            // White Structures
+            // Assess White Pawn chains
             if (whitePawnsOnFile[col] > 0) {
+                // Apply a penalty if multiple friendly pawns block each other in the same column
                 if (whitePawnsOnFile[col] > 1) score += DOUBLED_PAWN_PENALTY * (whitePawnsOnFile[col] - 1);
 
+                // Apply a penalty if no friendly pawns occupy the adjacent left or right files
                 boolean leftOk  = col > 0 && whitePawnsOnFile[col - 1] > 0;
                 boolean rightOk = col < 7 && whitePawnsOnFile[col + 1] > 0;
                 if (!leftOk && !rightOk) score += ISOLATED_PAWN_PENALTY;
 
+                // Check if this pawn has managed to sneak past all opposing defensive pawns
                 int advRow = whiteMostAdvanced[col];
                 boolean passed = true;
                 for (int fc = Math.max(0, col - 1); fc <= Math.min(7, col + 1); fc++) {
@@ -391,7 +406,7 @@ public class Evaluate {
                 }
             }
 
-            // Black Structures
+            // Assess Black Pawn chains
             if (blackPawnsOnFile[col] > 0) {
                 if (blackPawnsOnFile[col] > 1) score -= DOUBLED_PAWN_PENALTY * (blackPawnsOnFile[col] - 1);
 
@@ -416,6 +431,7 @@ public class Evaluate {
         return score;
     }
 
+    // Compares total alternative options available to each player to reward board mobility
     private static int evaluateMobility(Board board) {
         int ownMoves = board.generateMoves().size();
         board.whiteToMove = !board.whiteToMove;
@@ -426,6 +442,7 @@ public class Evaluate {
         return board.whiteToMove ? diff : -diff;
     }
 
+    // Evaluates rook efficiency on open files, semi-open files, or invading the enemy 7th rank line
     private static int evaluateRooks(Board board, int whitePawnFiles, int blackPawnFiles) {
         int score = 0;
         for (int i = 0; i < 64; i++) {
@@ -441,23 +458,26 @@ public class Evaluate {
             int oppPawnFiles = isWhite ? blackPawnFiles : whitePawnFiles;
             int fileMask = 1 << col;
 
+            // Reward placing rooks on files that have few or no pawns blocking them
             if ((ownPawnFiles & fileMask) == 0) {
                 if ((oppPawnFiles & fileMask) == 0) score += sign * ROOK_OPEN_FILE_BONUS;
                 else                                score += sign * ROOK_SEMI_OPEN_FILE_BONUS;
             }
 
+            // Reward rooks that break deep into the 7th rank to target base pawns or pin the king
             int seventhRank = isWhite ? 1 : 6;
             if (row == seventhRank) score += sign * ROOK_ON_7TH_BONUS;
         }
         return score;
     }
 
+    // Checks the surrounding protective pawn shield and open files near the king to assess vulnerability
     private static int evaluateKingSafety(Board board, boolean isWhite, int kingIdx, int ownPawnFiles, int oppPawnFiles) {
         int score = 0;
         int kingCol = kingIdx % 8;
         int kingRow = kingIdx / 8;
 
-        // Dynamic pawn structural tracking shield checks relative to the current position
+        // Reward a bonus if a wall of friendly shielding pawns stands immediately in front of the king
         int shieldRow = isWhite ? kingRow - 1 : kingRow + 1;
         if (shieldRow >= 0 && shieldRow < 8) {
             for (int dc = -1; dc <= 1; dc++) {
@@ -470,7 +490,7 @@ public class Evaluate {
             }
         }
 
-        // Open Files adjacent tracking vectors
+        // Apply a penalty if the files enclosing or directly next to the king layout are wide open
         for (int dc = -1; dc <= 1; dc++) {
             int fc = kingCol + dc;
             if (fc < 0 || fc >= 8) continue;
@@ -483,6 +503,7 @@ public class Evaluate {
         return score;
     }
 
+    // Checks if the remaining pieces on the board are capable of forcing a checkmate scenario
     public static boolean isInsufficientMaterial(Board board) {
         int whitePawns = 0, blackPawns = 0;
         int whiteRooks = 0, blackRooks = 0;
@@ -505,6 +526,7 @@ public class Evaluate {
             }
         }
 
+        // Pawns, rooks, or queens automatically provide sufficient winning material
         if (whitePawns > 0 || blackPawns > 0) return false;
         if (whiteRooks > 0 || blackRooks > 0) return false;
         if (whiteQueens > 0 || blackQueens > 0) return false;
@@ -512,10 +534,11 @@ public class Evaluate {
         int whiteMinor = whiteBishops + whiteKnights;
         int blackMinor = blackBishops + blackKnights;
 
-        if (whiteMinor == 0 && blackMinor == 0) return true;
-        if (whiteMinor == 1 && blackMinor == 0) return true;
-        if (whiteMinor == 0 && blackMinor == 1) return true;
-        if (whiteKnights == 2 && whiteBishops == 0 && blackMinor == 0) return true;
+        // Trigger an immediate draw if neither player has enough heavy pieces or active minors left
+        if (whiteMinor == 0 && blackMinor == 0) return true; // King vs King
+        if (whiteMinor == 1 && blackMinor == 0) return true; // King + Minor vs King
+        if (whiteMinor == 0 && blackMinor == 1) return true; // King vs King + Minor
+        if (whiteKnights == 2 && whiteBishops == 0 && blackMinor == 0) return true; // King + 2 Knights cannot force mate
         if (blackKnights == 2 && blackBishops == 0 && whiteMinor == 0) return true;
 
         return false;
