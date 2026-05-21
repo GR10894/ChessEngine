@@ -12,7 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 
 public class Game {
-    // Mode tracking constants
+    // Game mode settings
     public static final int MODE_PLAY_AS_WHITE = 0;
     public static final int MODE_PLAY_AS_BLACK = 1;
     public static final int MODE_TWO_PLAYERS   = 2;
@@ -20,17 +20,16 @@ public class Game {
     public static int gameMode = MODE_PLAY_AS_WHITE;
 
     public static void chessWindow() {
-        // Custom styling for option buttons
+        // Style the popup menu to match a dark theme
         UIManager.put("OptionPane.background", new Color(48, 46, 43));
         UIManager.put("Panel.background", new Color(48, 46, 43));
         UIManager.put("Button.background", new Color(115, 149, 82));
         UIManager.put("Button.foreground", Color.WHITE);
         UIManager.put("Button.font", new Font("SansSerif", Font.BOLD, 13));
-        UIManager.put("Button.focus", new Color(0,0,0,0)); // removes ugly focus borders
+        UIManager.put("Button.focus", new Color(0,0,0,0)); // hide the click border
 
         String[] options = {"Play as White", "Play as Black", "Local 2 Players"};
 
-        // Custom styled message label
         JLabel messageLabel = new JLabel("Choose your Game Mode:");
         messageLabel.setFont(new Font("SansSerif", Font.BOLD, 15));
         messageLabel.setForeground(Color.WHITE);
@@ -46,12 +45,13 @@ public class Game {
                 options[0]
         );
 
-        // Map choice selections, fallback to White vs AI if window closed
+        // Set the mode based on what the user clicked
         if (choice == 0) gameMode = MODE_PLAY_AS_WHITE;
         else if (choice == 1) gameMode = MODE_PLAY_AS_BLACK;
         else if (choice == 2) gameMode = MODE_TWO_PLAYERS;
         else gameMode = MODE_PLAY_AS_WHITE;
 
+        // Set up the main window
         JFrame window = new JFrame();
         window.setTitle("Chess");
         window.setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
@@ -68,7 +68,7 @@ public class Game {
 
         window.setVisible(true);
 
-        // If human selected black, trigger the AI to play the first white move immediately
+        // If playing as black, the AI needs to make the opening move immediately
         if (gameMode == MODE_PLAY_AS_BLACK) {
             chessBoard.triggerAIMove();
         }
@@ -106,6 +106,7 @@ class chessBoard extends JPanel {
     Rectangle[] promotionBounds = new Rectangle[4];
 
     public chessBoard() {
+        // Load images for all pieces (positive numbers for white, negative for black)
         pieceImages.put( 1, new ImageIcon("src/Resources/Images/1.png").getImage());
         pieceImages.put( 2, new ImageIcon("src/Resources/Images/2.png").getImage());
         pieceImages.put( 3, new ImageIcon("src/Resources/Images/3.png").getImage());
@@ -119,6 +120,7 @@ class chessBoard extends JPanel {
         pieceImages.put(-5, new ImageIcon("src/Resources/Images/-5.png").getImage());
         pieceImages.put(-6, new ImageIcon("src/Resources/Images/-6.png").getImage());
 
+        // Timer to handle the glowing effect on the game over screen
         glowTimer = new Timer(30, e -> {
             glowPhase += 0.07f;
             if (glowPhase > (float)(2 * Math.PI)) glowPhase -= (float)(2 * Math.PI);
@@ -131,14 +133,13 @@ class chessBoard extends JPanel {
 
                 if (aiThinking) return;
 
-                // ── Promotion picker ─────────────────────────────────────────
+                // Handle clicks on the pawn promotion menu
                 if (board.pendingPromotionSquare != -1) {
                     for (int i = 0; i < 4; i++) {
                         if (promotionBounds[i] != null && promotionBounds[i].contains(e.getPoint())) {
                             board.applyPromotion(PROMOTION_PIECES[i]);
                             checkGameOver();
 
-                            // Trigger AI move if it's the AI's turn
                             if (!gameOver && isAiTurn()) {
                                 triggerAIMove();
                             }
@@ -150,7 +151,7 @@ class chessBoard extends JPanel {
                     return;
                 }
 
-                // ── New Game button ──────────────────────────────────────────
+                // Handle clicks on the new game button
                 if (gameOver && newGameBtnBounds != null && newGameBtnBounds.contains(e.getPoint())) {
                     resetGame();
                     return;
@@ -158,6 +159,7 @@ class chessBoard extends JPanel {
 
                 if (gameOver) return;
 
+                // Calculate which square on the board was clicked
                 int Tile      = 64;
                 int BoardSize = Tile * 8;
                 int OffsetX   = (getWidth()  - BoardSize) / 2;
@@ -171,8 +173,9 @@ class chessBoard extends JPanel {
                 int clickedIndex = row * 8 + col;
                 int clickedPiece = board.boardArray[clickedIndex];
 
-                // Block human from moving AI components out of turn sequence
+                // Handle selecting a piece or moving it
                 if (!isPieceSelected) {
+                    // Check if player clicked one of their own pieces on their turn
                     if (isHumanTurn() && ((board.whiteToMove && clickedPiece > 0) || (!board.whiteToMove && clickedPiece < 0))) {
                         isPieceSelected = true;
                         fromIndex   = clickedIndex;
@@ -184,11 +187,13 @@ class chessBoard extends JPanel {
                     boolean clickedOwn = (board.whiteToMove && clickedPiece > 0) || (!board.whiteToMove && clickedPiece < 0);
 
                     if (clickedOwn) {
+                        // Switch selection to the newly clicked piece
                         fromIndex   = clickedIndex;
                         selectedRow = row;
                         selectedCol = col;
                         legalMoves  = board.generateLegalMoves(fromIndex);
                     } else if (legalMoves.contains(clickedIndex)) {
+                        // Move the selected piece to the new square
                         lastMoveFromRow = selectedRow;
                         lastMoveFromCol = selectedCol;
                         lastMoveToRow   = row;
@@ -205,12 +210,12 @@ class chessBoard extends JPanel {
                         if (board.pendingPromotionSquare == -1) {
                             checkGameOver();
 
-                            // Switch processing over to AI thread if mode conditions align
                             if (!gameOver && isAiTurn()) {
                                 triggerAIMove();
                             }
                         }
                     } else {
+                        // Reset if clicking an invalid square
                         isPieceSelected = false;
                         selectedRow = -1;
                         selectedCol = -1;
@@ -243,6 +248,7 @@ class chessBoard extends JPanel {
 
         Board searchSandbox = this.board.cloneBoard();
 
+        // Run AI search on a separate background thread so the UI doesn't freeze
         Thread aiThread = new Thread(() -> {
             try {
                 int[] bestMove = Search.findBestMove(searchSandbox, 1500);
@@ -252,6 +258,7 @@ class chessBoard extends JPanel {
                 int aiPromo = bestMove[2];
 
                 if (aiFrom != -1 && aiTo != -1) {
+                    // Update UI components back on the main event thread
                     SwingUtilities.invokeLater(() -> {
                         lastMoveFromRow = aiFrom / 8;
                         lastMoveFromCol = aiFrom % 8;
@@ -299,6 +306,7 @@ class chessBoard extends JPanel {
         newGameBtnBounds = null;
         glowTimer.stop();
 
+        // Close the current window and pop open a brand new configuration screen
         setVisible(false);
         JFrame parentFrame = (JFrame) SwingUtilities.getWindowAncestor(this);
         if (parentFrame != null) {
@@ -330,41 +338,41 @@ class chessBoard extends JPanel {
 
         super.paintComponent(g);
 
-        // Pre-compute check indicators for highlighting the King
         boolean isCurrentSideInCheck = board.isInCheck(board.whiteToMove);
         int targetKingPiece = board.whiteToMove ? 6 : -6;
 
+        // Draw the chessboard tiles and pieces
         for (int row = 0; row < 8; row++) {
             for (int col = 0; col < 8; col++) {
                 int currentIndex = row * 8 + col;
                 int piece = board.boardArray[currentIndex];
 
-                // Draw base tile checkerboard pattern
+                // Render light and dark squares
                 g.setColor((row + col) % 2 == 0
                         ? new Color(235, 236, 208)
                         : new Color(115, 149, 82));
                 g.fillRect(OffsetX + col * Tile, OffsetY + row * Tile, Tile, Tile);
 
-                // Highlight King in Red if currently under Check
+                // Highlight the king's square red if they are in check
                 if (isCurrentSideInCheck && piece == targetKingPiece) {
                     g.setColor(new Color(236, 75, 75, 180));
                     g.fillRect(OffsetX + col * Tile, OffsetY + row * Tile, Tile, Tile);
                 }
 
-                // Highlight historical last moved squares
+                // Highlight the squares from the last completed move
                 if ((row == lastMoveFromRow && col == lastMoveFromCol)
                         || (row == lastMoveToRow && col == lastMoveToCol)) {
                     g.setColor(new Color(255, 255, 0, 120));
                     g.fillRect(OffsetX + col * Tile, OffsetY + row * Tile, Tile, Tile);
                 }
 
-                // Highlight active clicked origin tile
+                // Highlight currently selected piece's starting square
                 if (row == selectedRow && col == selectedCol) {
                     g.setColor(new Color(255, 255, 0, 120));
                     g.fillRect(OffsetX + col * Tile, OffsetY + row * Tile, Tile, Tile);
                 }
 
-                // Render available paths/targets hints dots
+                // Draw dots/rings on squares the selected piece can safely move to
                 if (legalMoves.contains(currentIndex)) {
                     int centerX = OffsetX + col * Tile + Tile / 2;
                     int centerY = OffsetY + row * Tile + Tile / 2;
@@ -384,7 +392,7 @@ class chessBoard extends JPanel {
                     }
                 }
 
-                // Render assets piece visuals
+                // Draw the actual chess piece image
                 if (piece != 0) {
                     g.drawImage(pieceImages.get(piece),
                             OffsetX + col * Tile, OffsetY + row * Tile, Tile, Tile, null);
@@ -395,7 +403,7 @@ class chessBoard extends JPanel {
         Graphics2D g2d = (Graphics2D) g;
         g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 
-        // ── Dynamic Contextual Turn label ────────────────────────────────────
+        // Draw the text showing whose turn it is
         if (!gameOver && board.pendingPromotionSquare == -1) {
             String turnText;
             if (Game.gameMode == Game.MODE_TWO_PLAYERS) {
@@ -412,7 +420,7 @@ class chessBoard extends JPanel {
             g2d.drawString(turnText, textX, textY);
         }
 
-        // ── Promotion picker overlay ─────────────────────────────────────────
+        // Draw the popup menu for selecting a promotion piece
         if (board.pendingPromotionSquare != -1) {
             boolean promotingWhite = board.boardArray[board.pendingPromotionSquare] > 0;
 
@@ -446,7 +454,7 @@ class chessBoard extends JPanel {
             }
         }
 
-        // ── Game over overlay ────────────────────────────────────────────────
+        // Draw the end-of-game card overlay
         if (gameOver) {
             g2d.setColor(new Color(0, 0, 0, 140));
             g2d.fillRect(OffsetX, OffsetY, BoardSize, BoardSize);
